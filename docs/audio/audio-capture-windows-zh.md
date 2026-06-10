@@ -8,14 +8,14 @@ Meetily 是一款基于 Tauri 的桌面会议纪要应用。在 Windows 平台�
 
 ### 1.1 Windows 平台有何不同？
 
-| 关注点 | Windows 行为 | macOS 对应行为 |
-| --- | --- | --- |
-| 音频后端 | `cpal` host = `Wasapi`，无 `CoreAudio` / `ScreenCaptureKit` | `cidre` Core Audio tap，ScreenCaptureKit 作为备选 |
-| 系统音频 | 同一个 `cpal` 流，标记为 `DeviceType::Output` 并配置为捕获流；依赖 WASAPI 回环（当前代码树中无额外处理） | Core Audio tap 或 ScreenCaptureKit |
-| 设备选择 | 直接使用系统默认设备；`get_safe_recording_devices_macos` 在编译时被排除 | macOS 会将蓝牙设备覆盖为内置设备 |
-| 蓝牙检测 | 名称启发式 + WASAPI 命名模式（如 "Bluetooth Hands-Free Audio"） | Core Audio 传输类型 |
-| 权限管理 | 麦克风权限由 Windows 隐私设置处理；`trigger_audio_permission` 仅构建一个空操作的 CPAL 输入流并调用 `play()` | macOS 音频捕获权限对话框 |
-| Whisper GPU 加速 | 默认使用 CPU；编译时可选 `cuda` 或 `vulkan` 特性 | 默认使用 Metal + CoreML |
+| 关注点           | Windows 行为                                                                                                | macOS 对应行为                                    |
+| ---------------- | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| 音频后端         | `cpal` host = `Wasapi`，无 `CoreAudio` / `ScreenCaptureKit`                                                 | `cidre` Core Audio tap，ScreenCaptureKit 作为备选 |
+| 系统音频         | 同一个 `cpal` 流，标记为 `DeviceType::Output` 并配置为捕获流；依赖 WASAPI 回环（当前代码树中无额外处理）    | Core Audio tap 或 ScreenCaptureKit                |
+| 设备选择         | 直接使用系统默认设备；`get_safe_recording_devices_macos` 在编译时被排除                                     | macOS 会将蓝牙设备覆盖为内置设备                  |
+| 蓝牙检测         | 名称启发式 + WASAPI 命名模式（如 "Bluetooth Hands-Free Audio"）                                             | Core Audio 传输类型                               |
+| 权限管理         | 麦克风权限由 Windows 隐私设置处理；`trigger_audio_permission` 仅构建一个空操作的 CPAL 输入流并调用 `play()` | macOS 音频捕获权限对话框                          |
+| Whisper GPU 加速 | 默认使用 CPU；编译时可选 `cuda` 或 `vulkan` 特性                                                            | 默认使用 Metal + CoreML                           |
 
 ### 1.2 高层架构
 
@@ -65,36 +65,36 @@ flowchart TB
 
 ## 2. 模块布局
 
-| 文件 | 职责 |
-| --- | --- |
-| `audio/mod.rs` | 模块索引，统一再导出 |
-| `audio/devices/discovery.rs` | `list_audio_devices` 入口，调度至平台适配层 |
-| `audio/devices/platform/windows.rs` | WASAPI 设备枚举、默认设备查找、配置选择 |
-| `audio/devices/platform/mod.rs` | `cfg` 条件编译控制的平台函数再导出 |
-| `audio/devices/configuration.rs` | `AudioDevice` / `DeviceType` 模型，`get_device_and_config` |
-| `audio/devices/microphone.rs` | `default_input_device`、`find_builtin_input_device` |
-| `audio/devices/speakers.rs` | `default_output_device`、`find_builtin_output_device` |
-| `audio/devices/fallback.rs` | `get_safe_recording_devices`（Windows 使用系统默认值） |
-| `audio/stream.rs` | `AudioStream` + `AudioStreamManager`，构建 CPAL 流，多后端感知 |
-| `audio/pipeline.rs` | `AudioCapture`、`AudioMixerRingBuffer`、`ProfessionalAudioMixer`、VAD 驱动的 `AudioPipeline::run` |
-| `audio/ffmpeg_mixer.rs` | 参考实现 `FFmpegAudioMixer`，带逐源自适应缓冲区 |
-| `audio/recording_manager.rs` | 生命周期协调器（`start_recording`、`stop_streams_and_force_flush`） |
-| `audio/recording_commands.rs` | Tauri 命令适配器 |
-| `audio/recording_state.rs` | `RecordingState`、`AudioChunk`、`AudioError`、错误回调管道 |
-| `audio/recording_saver.rs` | 累积混合后的音频块，写入 `metadata.json` + `transcripts.json` |
-| `audio/incremental_saver.rs` | 基于检查点的 WAV 写入器，FFmpeg concat 终结器 |
-| `audio/device_detection.rs` | 多层蓝牙 vs 有线设备分类 |
-| `audio/device_monitor.rs` | 活跃设备的热插拔检测 |
-| `audio/audio_processing.rs` | `audio_to_mono`、`LoudnessNormalizer`（EBU R128）、`HighPassFilter`、`NoiseSuppressionProcessor`（RNNoise）、`resample` |
-| `audio/vad.rs` | Silero VAD 封装，`ContinuousVadProcessor` |
-| `audio/level_monitor.rs` | 向 UI 实时推送 RMS/峰值数据流 |
-| `audio/permissions.rs` | `trigger_audio_permission`（CPAL 探测），Windows 音频捕获为空操作 |
-| `audio/capture/mod.rs` | 再导出 `system`、`microphone`、`backend_config` |
-| `audio/capture/system.rs` | `SystemAudioCapture`（定义回环管道；使用与麦克风相同的 CPAL host） |
-| `audio/capture/microphone.rs` | 麦克风专用流逻辑占位符（当前通过 `stream.rs` 路由） |
-| `audio/capture/backend_config.rs` | 后端枚举（`ScreenCaptureKit` 作为跨平台占位；`CoreAudio` 通过 cfg 限制为 macOS） |
-| `audio/transcription/{engine,worker,provider,*}.rs` | Whisper / Parakeet 引擎抽象层 |
-| `audio/recording_preferences.rs` | 持久化 `auto_save`、首选麦克风/系统设备名称 |
+| 文件                                                | 职责                                                                                                                    |
+| --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `audio/mod.rs`                                      | 模块索引，统一再导出                                                                                                    |
+| `audio/devices/discovery.rs`                        | `list_audio_devices` 入口，调度至平台适配层                                                                             |
+| `audio/devices/platform/windows.rs`                 | WASAPI 设备枚举、默认设备查找、配置选择                                                                                 |
+| `audio/devices/platform/mod.rs`                     | `cfg` 条件编译控制的平台函数再导出                                                                                      |
+| `audio/devices/configuration.rs`                    | `AudioDevice` / `DeviceType` 模型，`get_device_and_config`                                                              |
+| `audio/devices/microphone.rs`                       | `default_input_device`、`find_builtin_input_device`                                                                     |
+| `audio/devices/speakers.rs`                         | `default_output_device`、`find_builtin_output_device`                                                                   |
+| `audio/devices/fallback.rs`                         | `get_safe_recording_devices`（Windows 使用系统默认值）                                                                  |
+| `audio/stream.rs`                                   | `AudioStream` + `AudioStreamManager`，构建 CPAL 流，多后端感知                                                          |
+| `audio/pipeline.rs`                                 | `AudioCapture`、`AudioMixerRingBuffer`、`ProfessionalAudioMixer`、VAD 驱动的 `AudioPipeline::run`                       |
+| `audio/ffmpeg_mixer.rs`                             | 参考实现 `FFmpegAudioMixer`，带逐源自适应缓冲区                                                                         |
+| `audio/recording_manager.rs`                        | 生命周期协调器（`start_recording`、`stop_streams_and_force_flush`）                                                     |
+| `audio/recording_commands.rs`                       | Tauri 命令适配器                                                                                                        |
+| `audio/recording_state.rs`                          | `RecordingState`、`AudioChunk`、`AudioError`、错误回调管道                                                              |
+| `audio/recording_saver.rs`                          | 累积混合后的音频块，写入 `metadata.json` + `transcripts.json`                                                           |
+| `audio/incremental_saver.rs`                        | 基于检查点的 WAV 写入器，FFmpeg concat 终结器                                                                           |
+| `audio/device_detection.rs`                         | 多层蓝牙 vs 有线设备分类                                                                                                |
+| `audio/device_monitor.rs`                           | 活跃设备的热插拔检测                                                                                                    |
+| `audio/audio_processing.rs`                         | `audio_to_mono`、`LoudnessNormalizer`（EBU R128）、`HighPassFilter`、`NoiseSuppressionProcessor`（RNNoise）、`resample` |
+| `audio/vad.rs`                                      | Silero VAD 封装，`ContinuousVadProcessor`                                                                               |
+| `audio/level_monitor.rs`                            | 向 UI 实时推送 RMS/峰值数据流                                                                                           |
+| `audio/permissions.rs`                              | `trigger_audio_permission`（CPAL 探测），Windows 音频捕获为空操作                                                       |
+| `audio/capture/mod.rs`                              | 再导出 `system`、`microphone`、`backend_config`                                                                         |
+| `audio/capture/system.rs`                           | `SystemAudioCapture`（定义回环管道；使用与麦克风相同的 CPAL host）                                                      |
+| `audio/capture/microphone.rs`                       | 麦克风专用流逻辑占位符（当前通过 `stream.rs` 路由）                                                                     |
+| `audio/capture/backend_config.rs`                   | 后端枚举（`ScreenCaptureKit` 作为跨平台占位；`CoreAudio` 通过 cfg 限制为 macOS）                                        |
+| `audio/transcription/{engine,worker,provider,*}.rs` | Whisper / Parakeet 引擎抽象层                                                                                           |
+| `audio/recording_preferences.rs`                    | 持久化 `auto_save`、首选麦克风/系统设备名称                                                                             |
 
 ## 3. 录制生命周期
 
@@ -221,13 +221,13 @@ pub enum AudioCaptureBackend {
 
 `build_stream` 根据 `SampleFormat` 进行分发：
 
-| 格式 | 转换方式 | 设计理由 |
-| --- | --- | --- |
-| `F32` | 直接传递 | 管线和重采样器以 `f32` 工作 |
-| `I16` | `sample as f32 / i16::MAX as f32` | 旧版 Windows 音频驱动上内置麦克风的常见格式 |
-| `I32` | `sample as f32 / i32::MAX as f32` | 某些专业 USB 设备 |
-| `I8` | `sample as f32 / i8::MAX as f32` | 罕见；某些虚拟音频线缆 |
-| 其他 | `Err("Unsupported sample format")` | 防御性设计 — 在当前 WASAPI 下的 Windows 上不应出现 |
+| 格式  | 转换方式                           | 设计理由                                           |
+| ----- | ---------------------------------- | -------------------------------------------------- |
+| `F32` | 直接传递                           | 管线和重采样器以 `f32` 工作                        |
+| `I16` | `sample as f32 / i16::MAX as f32`  | 旧版 Windows 音频驱动上内置麦克风的常见格式        |
+| `I32` | `sample as f32 / i32::MAX as f32`  | 某些专业 USB 设备                                  |
+| `I8`  | `sample as f32 / i8::MAX as f32`   | 罕见；某些虚拟音频线缆                             |
+| 其他  | `Err("Unsupported sample format")` | 防御性设计 — 在当前 WASAPI 下的 Windows 上不应出现 |
 
 每个回调克隆一个 `AudioCapture`（开销极低，因为它是一个 `Arc` 集合），并在音频线程内调用 `process_audio_data(data)`。第二个 `Arc::clone` 传递给 `handle_stream_error`，因此错误路径无需触碰音频缓冲区。
 
@@ -249,16 +249,16 @@ pub enum AudioCaptureBackend {
 
 ```mermaid
 flowchart TB
-    A[CPAL 回调数据] --> B{正在录制？}
-    B -- 否 --> X[丢弃]
-    B -- 是 --> C[audio_to_mono (若通道数>1)]
-    C --> D{需要重采样？}
-    D -- 是 --> E[持久化 SincFixedIn<br/>缓冲 512 样本块]
-    D -- 否 --> F
-    E --> F[仅麦克风: 高通滤波 → RNNoise → EBU R128 归一化]
-    F --> G[构建 AudioChunk<br/>时间戳来自 state]
-    G --> H[state.send_audio_chunk]
-    H --> I[管线: 环形缓冲区 → 混音器 → VAD]
+    A["CPAL 回调数据"] --> B{"正在录制"}
+    B -- 否 --> X["丢弃"]
+    B -- 是 --> C["audio_to_mono (多通道降混)"]
+    C --> D{"需要重采样"}
+    D -- 是 --> E["持久化 SincFixedIn (512 样本块)"]
+    D -- 否 --> F["仅麦克风链: 高通滤波, RNNoise, EBU R128"]
+    E --> F
+    F --> G["构建 AudioChunk (时间戳来自 state)"]
+    G --> H["state.send_audio_chunk"]
+    H --> I["管线: 环形缓冲区, 混音器, VAD"]
 ```
 
 操作顺序至关重要，源代码中的注释明确说明了设计理由：
@@ -276,13 +276,13 @@ flowchart TB
 
 `AudioCapture::new` 在构建时决定是否需要重采样。当需要时，根据采样率比率选择参数创建持久化的 `SincFixedIn<f32>` 重采样器：
 
-| 比率 | sinc_len | 插值方式 | 过采样 |
-| --- | --- | --- | --- |
-| ≥ 2.0（重上采样，如 16 → 48 kHz） | 512 | Cubic | 512 |
-| 1.5–2.0 | 384 | Cubic | 384 |
-| 1.0–1.5（如 44.1 → 48 kHz） | 256 | Linear | 256 |
-| ≤ 0.5（重下采样） | 512 | Cubic | 512 |
-| 0.5–1.0 | 384 | Linear | 384 |
+| 比率                              | sinc_len | 插值方式 | 过采样 |
+| --------------------------------- | -------- | -------- | ------ |
+| ≥ 2.0（重上采样，如 16 → 48 kHz） | 512      | Cubic    | 512    |
+| 1.5–2.0                           | 384      | Cubic    | 384    |
+| 1.0–1.5（如 44.1 → 48 kHz）       | 256      | Linear   | 256    |
+| ≤ 0.5（重下采样）                 | 512      | Cubic    | 512    |
+| 0.5–1.0                           | 384      | Linear   | 384    |
 
 重采样器被包装在 `Arc<Mutex<…>>` 中，并 **跨音频块持久化**。早期实现中每次回调都创建新的重采样器，导致约 173% 的能量放大，因为内部滤波器状态每次都会重置。当前实现复用一个重采样器并缓冲输入直到达到 512 个样本（`RESAMPLER_CHUNK_SIZE`），使 Sinc 卷积能够在完整的状态历史和一致的叠接下运行。
 
@@ -292,13 +292,13 @@ flowchart TB
 
 `handle_stream_error(error: cpal::StreamError)` 将 CPAL 的通用错误字符串转换为 `AudioError` 变体之一：
 
-| 错误中的子字符串 | 映射的变体 | 可恢复？ |
-| --- | --- | --- |
-| `device is no longer available` / `device not found` / `disconnected` / `no such device` / `unavailable` / `removed` | `DeviceDisconnected` | 是 |
-| `permission` / `access denied` | `PermissionDenied` | 否 |
-| `channel closed` | `ChannelClosed` | 否 |
-| `stream` + `failed` | `StreamFailed` | 是 |
-| 其他 | `StreamFailed` | 是 |
+| 错误中的子字符串                                                                                                     | 映射的变体           | 可恢复？ |
+| -------------------------------------------------------------------------------------------------------------------- | -------------------- | -------- |
+| `device is no longer available` / `device not found` / `disconnected` / `no such device` / `unavailable` / `removed` | `DeviceDisconnected` | 是       |
+| `permission` / `access denied`                                                                                       | `PermissionDenied`   | 否       |
+| `channel closed`                                                                                                     | `ChannelClosed`      | 否       |
+| `stream` + `failed`                                                                                                  | `StreamFailed`       | 是       |
+| 其他                                                                                                                 | `StreamFailed`       | 是       |
 
 然后调用 `RecordingState::report_error`。可恢复错误被单独计数；一旦达到 10 个可恢复错误，录制将被停止。达到 15 个总错误后录制也会被停止，作为硬性上限。
 
@@ -372,12 +372,12 @@ flowchart LR
 
 `detect_windows_native` 识别 Microsoft 用于蓝牙和内置音频的 WASAPI 命名约定：
 
-| 模式（不区分大小写） | 分类 |
-| --- | --- |
-| 以 `bluetooth audio` 开头 | 蓝牙 |
-| 包含 `bluetooth hands-free` | 蓝牙 |
-| 包含 `bluetooth stereo` | 蓝牙 |
-| 包含 `usb audio` | 有线 |
+| 模式（不区分大小写）         | 分类                 |
+| ---------------------------- | -------------------- |
+| 以 `bluetooth audio` 开头    | 蓝牙                 |
+| 包含 `bluetooth hands-free`  | 蓝牙                 |
+| 包含 `bluetooth stereo`      | 蓝牙                 |
+| 包含 `usb audio`             | 有线                 |
 | 包含 `realtek` 或 `conexant` | 有线（内置编解码器） |
 
 对于无法识别/未匹配的名称，跨平台名称启发式接管。它们分为三个置信度等级（99%、95%、85%）；第三层记录为 `WARN`，因为它可能在类似 "Wireless USB Headset"（实际为有线）的设备上产生误报。
@@ -389,10 +389,10 @@ flowchart LR
 `InputDeviceKind::buffer_timeout()` 返回用于自适应超时的 `(min, max)` 范围：
 
 | 类型 | 最小值 | 最大值 |
-| --- | --- | --- |
-| 有线 | 20 ms | 50 ms |
-| 蓝牙 | 80 ms | 200 ms |
-| 未知 | 80 ms | 180 ms |
+| ---- | ------ | ------ |
+| 有线 | 20 ms  | 50 ms  |
+| 蓝牙 | 80 ms  | 200 ms |
+| 未知 | 80 ms  | 180 ms |
 
 `calculate_buffer_timeout` 接收设备类型以及报告的缓冲区大小和采样率，返回一个时长：
 
@@ -484,18 +484,18 @@ Windows 构建默认使用带 `raw-api` 的 `whisper-rs`；用户可以在编译
 
 ### 14.1 错误 → 动作映射表
 
-| 来源 | 检测方式 | 动作 |
-| --- | --- | --- |
-| 麦克风权限被拒 | `trigger_audio_permission` 返回 `Ok(false)` | 前端显示引导模态框；录制拒绝启动 |
-| 无输入设备 | `default_input_device` 返回 `Err` | Tauri 命令返回 `Err("No microphone device available")` |
-| 流构建失败 | `AudioStream::create` 返回 `Err` | Tauri 命令向前端返回 `Err`；录制在任何流运行之前中止 |
-| 录制中途流错误 | `cpal::StreamError` 回调 | 映射为 `AudioError` 并报告；可恢复错误被计数 |
-| 设备断开连接 | `AudioDeviceMonitor` 中的轮询 | 发出 `DeviceEvent::DeviceDisconnected`；UI 可调用 `attempt_device_reconnect` |
-| 采样率不匹配 | 管线强制 48 kHz；重采样器延迟创建 | `AudioCapture::new` 记录策略和比率；如果重采样器创建失败，记录 `WARN` 并回退至无重采样（此时预期设备已经是 48 kHz） |
-| 管线溢出 | `AudioMixerRingBuffer::add_samples` 溢出检查 | 麦克风溢出 → `WARN`；系统溢出 → `ERROR` 并丢弃最旧的样本 |
-| 转写引擎未就绪 | `validate_transcription_model_ready` | 以明确错误拒绝录制，并发出 `transcription-error` 事件且 `actionable: false`（toast，非模态框） |
-| 录制中途崩溃 | 增量保存器每 30 秒写入检查点 | 下次启动时，`recover_audio_from_checkpoints` 可以从检查点重建音频文件 |
-| WASAPI 设备被占用 | `default_input_config` / `default_output_config` 返回包含 "in use" 或 "access denied" 的错误 | `get_windows_device` 切换到列表中的下一个设备；如果没有剩余设备，返回包含设备名称的 `Err` |
+| 来源              | 检测方式                                                                                     | 动作                                                                                                                |
+| ----------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| 麦克风权限被拒    | `trigger_audio_permission` 返回 `Ok(false)`                                                  | 前端显示引导模态框；录制拒绝启动                                                                                    |
+| 无输入设备        | `default_input_device` 返回 `Err`                                                            | Tauri 命令返回 `Err("No microphone device available")`                                                              |
+| 流构建失败        | `AudioStream::create` 返回 `Err`                                                             | Tauri 命令向前端返回 `Err`；录制在任何流运行之前中止                                                                |
+| 录制中途流错误    | `cpal::StreamError` 回调                                                                     | 映射为 `AudioError` 并报告；可恢复错误被计数                                                                        |
+| 设备断开连接      | `AudioDeviceMonitor` 中的轮询                                                                | 发出 `DeviceEvent::DeviceDisconnected`；UI 可调用 `attempt_device_reconnect`                                        |
+| 采样率不匹配      | 管线强制 48 kHz；重采样器延迟创建                                                            | `AudioCapture::new` 记录策略和比率；如果重采样器创建失败，记录 `WARN` 并回退至无重采样（此时预期设备已经是 48 kHz） |
+| 管线溢出          | `AudioMixerRingBuffer::add_samples` 溢出检查                                                 | 麦克风溢出 → `WARN`；系统溢出 → `ERROR` 并丢弃最旧的样本                                                            |
+| 转写引擎未就绪    | `validate_transcription_model_ready`                                                         | 以明确错误拒绝录制，并发出 `transcription-error` 事件且 `actionable: false`（toast，非模态框）                      |
+| 录制中途崩溃      | 增量保存器每 30 秒写入检查点                                                                 | 下次启动时，`recover_audio_from_checkpoints` 可以从检查点重建音频文件                                               |
+| WASAPI 设备被占用 | `default_input_config` / `default_output_config` 返回包含 "in use" 或 "access denied" 的错误 | `get_windows_device` 切换到列表中的下一个设备；如果没有剩余设备，返回包含设备名称的 `Err`                           |
 
 ## 15. 性能优化
 
@@ -511,22 +511,22 @@ Windows 音频路径包含若干容易被意外破坏的性能优化：
 
 ## 16. 兼容性矩阵（Windows）
 
-| 功能 | 状态 | 备注 |
-| --- | --- | --- |
-| 麦克风捕获（WASAPI） | 已支持 | 默认且唯一的麦克风后端 |
-| 系统音频回环 | 已支持（CPAL 输出设备标记为 `Output`） | 依赖所选设备的 WASAPI 回环能力；某些虚拟设备仅暴露渲染端点，必须重新路由 |
-| 蓝牙设备检测 | 已支持（名称 + WASAPI 模式） | 见 §9.1 |
-| 自适应缓冲区超时 | 已支持 | 由 `InputDeviceKind` 驱动 |
-| 系统音频活动事件 | 不支持 | 仅 macOS（`system_detector.rs` 通过 cfg 门控） |
-| 热插拔检测 | 已支持 | 见 §11 |
-| 增量保存 | 已支持 | 30 秒检查点；终结时 FFmpeg concat |
-| 崩溃恢复 | 已支持 | `recover_audio_from_checkpoints` |
-| Whisper CPU | 已支持（默认） | `whisper-rs` raw-api |
-| Whisper CUDA | 编译时可选 | `--features cuda` |
-| Whisper Vulkan | 编译时可选 | `--features vulkan` |
-| EBU R128 归一化 | 已支持（仅麦克风） | `audio_processing::LoudnessNormalizer` |
-| RNNoise 降噪 | 已支持但默认禁用 | `RNNOISE_APPLY_ENABLED = false` |
-| 高通滤波器（80 Hz） | 已支持（仅麦克风） | `audio_processing::HighPassFilter` |
+| 功能                 | 状态                                   | 备注                                                                     |
+| -------------------- | -------------------------------------- | ------------------------------------------------------------------------ |
+| 麦克风捕获（WASAPI） | 已支持                                 | 默认且唯一的麦克风后端                                                   |
+| 系统音频回环         | 已支持（CPAL 输出设备标记为 `Output`） | 依赖所选设备的 WASAPI 回环能力；某些虚拟设备仅暴露渲染端点，必须重新路由 |
+| 蓝牙设备检测         | 已支持（名称 + WASAPI 模式）           | 见 §9.1                                                                  |
+| 自适应缓冲区超时     | 已支持                                 | 由 `InputDeviceKind` 驱动                                                |
+| 系统音频活动事件     | 不支持                                 | 仅 macOS（`system_detector.rs` 通过 cfg 门控）                           |
+| 热插拔检测           | 已支持                                 | 见 §11                                                                   |
+| 增量保存             | 已支持                                 | 30 秒检查点；终结时 FFmpeg concat                                        |
+| 崩溃恢复             | 已支持                                 | `recover_audio_from_checkpoints`                                         |
+| Whisper CPU          | 已支持（默认）                         | `whisper-rs` raw-api                                                     |
+| Whisper CUDA         | 编译时可选                             | `--features cuda`                                                        |
+| Whisper Vulkan       | 编译时可选                             | `--features vulkan`                                                      |
+| EBU R128 归一化      | 已支持（仅麦克风）                     | `audio_processing::LoudnessNormalizer`                                   |
+| RNNoise 降噪         | 已支持但默认禁用                       | `RNNOISE_APPLY_ENABLED = false`                                          |
+| 高通滤波器（80 Hz）  | 已支持（仅麦克风）                     | `audio_processing::HighPassFilter`                                       |
 
 ## 17. 扩展 Windows 路径
 
@@ -558,32 +558,32 @@ Windows 音频路径包含若干容易被意外破坏的性能优化：
 
 ## 18. 关键代码索引
 
-| 关注点 | 文件 | 符号 |
-| --- | --- | --- |
-| Tauri 命令接口 | `frontend/src-tauri/src/lib.rs` | `start_recording_with_devices_and_meeting`、`stop_recording`、`get_audio_devices`、`trigger_microphone_permission`、`start_audio_level_monitoring` |
-| 录制生命周期 | `frontend/src-tauri/src/audio/recording_manager.rs` | `RecordingManager::start_recording`、`RecordingManager::stop_streams_and_force_flush` |
-| Tauri 命令适配器 | `frontend/src-tauri/src/audio/recording_commands.rs` | `start_recording_with_devices_and_meeting`、`start_recording_with_meeting_name` |
-| 设备发现（跨平台） | `frontend/src-tauri/src/audio/devices/discovery.rs` | `list_audio_devices`、`trigger_audio_permission` |
-| WASAPI 枚举 | `frontend/src-tauri/src/audio/devices/platform/windows.rs` | `configure_windows_audio`、`get_windows_device` |
-| 设备模型 | `frontend/src-tauri/src/audio/devices/configuration.rs` | `AudioDevice`、`DeviceType`、`get_device_and_config` |
-| 默认麦克风 | `frontend/src-tauri/src/audio/devices/microphone.rs` | `default_input_device`、`find_builtin_input_device` |
-| 默认扬声器 | `frontend/src-tauri/src/audio/devices/speakers.rs` | `default_output_device`、`find_builtin_output_device` |
-| 音频流构建 | `frontend/src-tauri/src/audio/stream.rs` | `AudioStream::create_with_backend`、`AudioStreamManager::start_streams` |
-| 逐流处理 | `frontend/src-tauri/src/audio/pipeline.rs` | `AudioCapture::new`、`AudioCapture::process_audio_data`、`AudioPipeline::run`、`AudioMixerRingBuffer`、`ProfessionalAudioMixer` |
-| 参考混音器 | `frontend/src-tauri/src/audio/ffmpeg_mixer.rs` | `FFmpegAudioMixer`、`SourceBuffer`、`AudioMixer` |
-| 设备检测 | `frontend/src-tauri/src/audio/device_detection.rs` | `InputDeviceKind::detect`、`InputDeviceKind::buffer_timeout`、`detect_windows_native` |
-| 后端枚举 | `frontend/src-tauri/src/audio/capture/backend_config.rs` | `AudioCaptureBackend`、`BACKEND_CONFIG` |
-| 系统捕获 | `frontend/src-tauri/src/audio/capture/system.rs` | `SystemAudioCapture`、`start_system_audio_capture` |
-| 麦克风捕获 | `frontend/src-tauri/src/audio/capture/microphone.rs` | （占位符，麦克风通过 `stream.rs` 路由） |
-| 权限管理 | `frontend/src-tauri/src/audio/permissions.rs` | `trigger_system_audio_permission`、`trigger_audio_permission` |
-| 热插拔监控 | `frontend/src-tauri/src/audio/device_monitor.rs` | `AudioDeviceMonitor::start_monitoring` |
-| 电平监控（真实） | `frontend/src-tauri/src/audio/level_monitor.rs` | `AudioLevelMonitor::start_monitoring` |
-| 电平监控（占位） | `frontend/src-tauri/src/audio/simple_level_monitor.rs` | `start_monitoring`、`stop_monitoring` |
-| 重采样、归一化、RNNoise、高通 | `frontend/src-tauri/src/audio/audio_processing.rs` | `resample`、`LoudnessNormalizer`、`NoiseSuppressionProcessor`、`HighPassFilter`、`audio_to_mono` |
-| VAD 封装 | `frontend/src-tauri/src/audio/vad.rs` | `ContinuousVadProcessor`、`extract_speech_16k` |
-| 录制状态 / 错误 | `frontend/src-tauri/src/audio/recording_state.rs` | `RecordingState`、`AudioError`、`AudioChunk` |
-| 保存器 | `frontend/src-tauri/src/audio/recording_saver.rs` | `RecordingSaver::start_accumulation`、`RecordingSaver::stop_and_save` |
-| 增量检查点 | `frontend/src-tauri/src/audio/incremental_saver.rs` | `IncrementalAudioSaver::add_chunk`、`recover_audio_from_checkpoints` |
-| 转写入口 | `frontend/src-tauri/src/audio/transcription/engine.rs` | `validate_transcription_model_ready`、`get_or_init_transcription_engine` |
-| 转写 Worker | `frontend/src-tauri/src/audio/transcription/worker.rs` | `start_transcription_task` |
-| Cargo 特性 (Win) | `frontend/src-tauri/Cargo.toml` | `target.'cfg(target_os = "windows")'.dependencies` |
+| 关注点                        | 文件                                                       | 符号                                                                                                                                               |
+| ----------------------------- | ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Tauri 命令接口                | `frontend/src-tauri/src/lib.rs`                            | `start_recording_with_devices_and_meeting`、`stop_recording`、`get_audio_devices`、`trigger_microphone_permission`、`start_audio_level_monitoring` |
+| 录制生命周期                  | `frontend/src-tauri/src/audio/recording_manager.rs`        | `RecordingManager::start_recording`、`RecordingManager::stop_streams_and_force_flush`                                                              |
+| Tauri 命令适配器              | `frontend/src-tauri/src/audio/recording_commands.rs`       | `start_recording_with_devices_and_meeting`、`start_recording_with_meeting_name`                                                                    |
+| 设备发现（跨平台）            | `frontend/src-tauri/src/audio/devices/discovery.rs`        | `list_audio_devices`、`trigger_audio_permission`                                                                                                   |
+| WASAPI 枚举                   | `frontend/src-tauri/src/audio/devices/platform/windows.rs` | `configure_windows_audio`、`get_windows_device`                                                                                                    |
+| 设备模型                      | `frontend/src-tauri/src/audio/devices/configuration.rs`    | `AudioDevice`、`DeviceType`、`get_device_and_config`                                                                                               |
+| 默认麦克风                    | `frontend/src-tauri/src/audio/devices/microphone.rs`       | `default_input_device`、`find_builtin_input_device`                                                                                                |
+| 默认扬声器                    | `frontend/src-tauri/src/audio/devices/speakers.rs`         | `default_output_device`、`find_builtin_output_device`                                                                                              |
+| 音频流构建                    | `frontend/src-tauri/src/audio/stream.rs`                   | `AudioStream::create_with_backend`、`AudioStreamManager::start_streams`                                                                            |
+| 逐流处理                      | `frontend/src-tauri/src/audio/pipeline.rs`                 | `AudioCapture::new`、`AudioCapture::process_audio_data`、`AudioPipeline::run`、`AudioMixerRingBuffer`、`ProfessionalAudioMixer`                    |
+| 参考混音器                    | `frontend/src-tauri/src/audio/ffmpeg_mixer.rs`             | `FFmpegAudioMixer`、`SourceBuffer`、`AudioMixer`                                                                                                   |
+| 设备检测                      | `frontend/src-tauri/src/audio/device_detection.rs`         | `InputDeviceKind::detect`、`InputDeviceKind::buffer_timeout`、`detect_windows_native`                                                              |
+| 后端枚举                      | `frontend/src-tauri/src/audio/capture/backend_config.rs`   | `AudioCaptureBackend`、`BACKEND_CONFIG`                                                                                                            |
+| 系统捕获                      | `frontend/src-tauri/src/audio/capture/system.rs`           | `SystemAudioCapture`、`start_system_audio_capture`                                                                                                 |
+| 麦克风捕获                    | `frontend/src-tauri/src/audio/capture/microphone.rs`       | （占位符，麦克风通过 `stream.rs` 路由）                                                                                                            |
+| 权限管理                      | `frontend/src-tauri/src/audio/permissions.rs`              | `trigger_system_audio_permission`、`trigger_audio_permission`                                                                                      |
+| 热插拔监控                    | `frontend/src-tauri/src/audio/device_monitor.rs`           | `AudioDeviceMonitor::start_monitoring`                                                                                                             |
+| 电平监控（真实）              | `frontend/src-tauri/src/audio/level_monitor.rs`            | `AudioLevelMonitor::start_monitoring`                                                                                                              |
+| 电平监控（占位）              | `frontend/src-tauri/src/audio/simple_level_monitor.rs`     | `start_monitoring`、`stop_monitoring`                                                                                                              |
+| 重采样、归一化、RNNoise、高通 | `frontend/src-tauri/src/audio/audio_processing.rs`         | `resample`、`LoudnessNormalizer`、`NoiseSuppressionProcessor`、`HighPassFilter`、`audio_to_mono`                                                   |
+| VAD 封装                      | `frontend/src-tauri/src/audio/vad.rs`                      | `ContinuousVadProcessor`、`extract_speech_16k`                                                                                                     |
+| 录制状态 / 错误               | `frontend/src-tauri/src/audio/recording_state.rs`          | `RecordingState`、`AudioError`、`AudioChunk`                                                                                                       |
+| 保存器                        | `frontend/src-tauri/src/audio/recording_saver.rs`          | `RecordingSaver::start_accumulation`、`RecordingSaver::stop_and_save`                                                                              |
+| 增量检查点                    | `frontend/src-tauri/src/audio/incremental_saver.rs`        | `IncrementalAudioSaver::add_chunk`、`recover_audio_from_checkpoints`                                                                               |
+| 转写入口                      | `frontend/src-tauri/src/audio/transcription/engine.rs`     | `validate_transcription_model_ready`、`get_or_init_transcription_engine`                                                                           |
+| 转写 Worker                   | `frontend/src-tauri/src/audio/transcription/worker.rs`     | `start_transcription_task`                                                                                                                         |
+| Cargo 特性 (Win)              | `frontend/src-tauri/Cargo.toml`                            | `target.'cfg(target_os = "windows")'.dependencies`                                                                                                 |
