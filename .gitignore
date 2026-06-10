@@ -77,3 +77,9 @@ experiments/
 target/
 
 frontend/src-tauri/binaries/
+
+
+# IDE related 
+.qoder
+.vscode
+.trae
