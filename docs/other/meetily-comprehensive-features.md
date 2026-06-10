@@ -15,8 +15,9 @@ A comprehensive reference for Meetily's core features, technical capabilities, s
 - Generates structured meeting summaries using configurable LLM backends.
 - Supported providers:
   - **Ollama** (local, recommended for privacy)
+  - **BuiltInAI** (local Llama via llama-helper sidecar)
   - **Claude** (Anthropic)
-  - **GPT-4** (OpenAI-compatible)
+  - **OpenAI** (GPT-4o, GPT-4o-mini)
   - **Groq** (fast inference)
   - **OpenRouter** (multi-model gateway)
   - **Custom OpenAI-compatible endpoints** (self-hosted or third-party)
@@ -42,7 +43,8 @@ Hardware acceleration is built in and automatically enabled at build time:
 | macOS (Apple Silicon) | Metal + CoreML |
 | Windows / Linux (NVIDIA) | CUDA |
 | Windows / Linux (AMD/Intel) | Vulkan |
-| No GPU available | Optimized CPU fallback |
+| Linux (AMD with ROCm) | HIP BLAS |
+| No GPU available | OpenBLAS-optimized CPU fallback |
 
 ### Flexible Data Persistence
 
@@ -53,7 +55,7 @@ Hardware acceleration is built in and automatically enabled at build time:
 ### Cross-Platform Support
 
 - **macOS** — Apple Silicon and Intel, distributed as `.dmg`.
-- **Windows** — x64, distributed as `.exe` installer.
+- **Windows** — x64, distributed as `.exe` (NSIS installer) and `.msi`.
 - **Linux** — Built from source with automatic GPU detection.
 
 ### Open Source & Extensible
@@ -101,7 +103,7 @@ Hardware acceleration is built in and automatically enabled at build time:
 | **Offline Support** | Full offline capability | Requires internet | Partial |
 | **Cost** | Free (MIT license) | Per-seat / per-minute pricing | Free, but may need paid APIs |
 | **GPU Acceleration** | Built-in, auto-detected | N/A (cloud) | Manual configuration |
-| **AI Summary Providers** | 6+ providers + custom endpoints | Single vendor | Limited |
+| **AI Summary Providers** | 7 providers + custom endpoints | Single vendor | Limited |
 | **App Size** | Lightweight (Tauri) | N/A (web-based) | Varies (often Electron) |
 | **Privacy Compliance** | Zero data exposure | Vendor-dependent | Depends on implementation |
 
