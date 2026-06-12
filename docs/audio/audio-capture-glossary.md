@@ -1,6 +1,6 @@
 # Meetily 音频捕获技术术语表
 
-本文档系统整理了 [audio-capture.md](file:///home/zy/repo/opensource/meetily/docs/audio/audio-capture.md) 与 [audio-capture-zh.md](file:///home/zy/repo/opensource/meetily/docs/audio/audio-capture-zh.md) 中出现的全部技术术语,按照主题分类,便于快速查阅。
+本文档系统整理了 [audio-capture.md](file:///home/zy/repo/opensource/meetily/docs/audio/audio-capture.md) 与 [audio-capture-zh.md](file:///home/zy/repo/opensource/meetily/docs/audio/audio-capture-zh.md) 中出现的全部技术术语,以及 [微软Teams音频处理技术调研报告](file:///home/zy/repo/opensource/meetily/docs/audio/微软Teams音频处理技术调研报告：回声消除与降噪.md) 中的回声消除与降噪相关术语,按照主题分类,便于快速查阅。
 
 - **术语 (Term)**:文档中出现的英文 / 缩写形式。
 - **全称 (Full Form)**:缩写的完整展开 (如适用)。
@@ -84,6 +84,12 @@
 | Resampling | Sample Rate Conversion | 采样率转换,例如将 44.1 kHz 转换为 48 kHz。 |
 | Mono Mix-down | Mono Mix-down | 多声道降为单声道的混缩过程。 |
 | Buffer Stats | Buffer Statistics | 混音器内部的状态统计,包括已接收块数、间隙数、插入静音量等。 |
+| Far-end Signal | Far-end Signal | 远端信号,指来自远程通话方的音频信号,在发送到扬声器之前被截取作为回声消除的参考信号。 |
+| Near-end Signal | Near-end Signal | 近端信号,指本地麦克风采集到的混合信号,包含近端语音、回声与背景噪声。 |
+| Frame Size / Frame Shift | Frame Size / Frame Shift | 帧长与帧移,帧长为每帧的时长 (如 20ms),帧移为相邻帧之间的时间偏移 (如 10ms)。 |
+| Lookahead Window | Lookahead Window | 前瞻窗口,处理当前帧时可额外查看的未来音频范围 (如 40ms),用于提升处理质量但增加延迟。 |
+| SNR | Signal-to-Noise Ratio | 信噪比,信号功率与噪声功率的比值,单位 dB;信噪比越低,语音增强难度越大。 |
+| Causal Processing | Causal Processing | 因果处理,仅使用当前与过去帧的信息进行处理,不使用未来信息,满足实时通信要求。 |
 
 ## 5. 音频处理与算法
 
@@ -112,6 +118,37 @@
 | AudioMode::Hybrid | Audio Mode (Hybrid) | 旧版与新版管线并行的运行模式。 |
 | rubato | rubato (Rust Crate) | 高质量音频重采样库,Meetily 使用其 SincFixedIn 算法。 |
 | SincFixedIn | Sinc Interpolation Fixed Input | 基于 Sinc 插值的固定输入重采样算法。 |
+| MAS | Microsoft Audio Stack | 微软音频栈,嵌入 Windows 10/11 的 DSP 技术集合,包含 AEC、NS、DR、AGC 等模块,针对 Surface 与认证耳机深度优化。 |
+| AEC | Acoustic Echo Cancellation | 声学回声消除,消除扬声器声音被麦克风拾取后产生的回声。 |
+| NS | Noise Suppression (Abbreviation) | 噪声抑制的缩写形式,通过信号处理或深度学习降低背景噪声。 |
+| DR | Dereverberation | 去混响,减少房间声学反射 (混响) 对语音质量的影响。 |
+| AGC | Automatic Gain Control | 自动增益控制,动态调整语音音量,使输出电平保持在合理范围内。 |
+| Voice Isolation | Voice Isolation | 语音隔离,基于声纹的个性化语音分离,只传输目标用户的清晰语音,抑制背景人声干扰。 |
+| NLMS | Normalized Least Mean Squares | 归一化最小均方算法,经典自适应滤波算法,用于建立房间脉冲响应模型以消除回声。 |
+| Adaptive Filter | Adaptive Filter | 自适应滤波器,通过误差信号迭代更新滤波器系数,用于回声消除中的回声路径估计。 |
+| RIR | Room Impulse Response | 房间脉冲响应,描述房间声学特性的数学模型,反映声音从声源到麦克风的传播路径。 |
+| ERLE | Echo Return Loss Enhancement | 回声返回损耗增强,衡量回声消除效果的核心指标,目标值 > 40dB,数值越大消除效果越好。 |
+| ERL | Echo Return Loss | 回声返回损耗,回声信号相对于原始信号的衰减量。 |
+| DT | Double Talk | 双向通话,通话双方同时说话的场景,要求 AEC 算法在消除回声的同时保留近端语音。 |
+| Spectral Subtraction | Spectral Subtraction | 频谱减法,经典降噪算法,估计噪声功率谱并从带噪语音谱中减去;易产生 "音乐噪声" 伪影。 |
+| Wiener Filtering | Wiener Filtering | 维纳滤波,基于最小均方误差准则的最优线性滤波方法,需要准确的噪声与语音功率谱估计。 |
+| DeepVQE | Deep Voice Quality Enhancement | 微软研究院 2023 年发布的端到端联合处理模型,单模型同时执行 AEC、NS、DR 三大任务;7.5M 参数,CPU 推理 3.66ms/帧;已成功部署到 Microsoft Teams 生产环境。 |
+| DeepVQE-S | DeepVQE Small | DeepVQE 的轻量化版本,仅 0.8M 参数,推理速度 < 1ms/帧 (Intel i7),适合边缘设备部署。 |
+| Cross-Attention Alignment | Cross-Attention Alignment | 交叉注意力对齐,DeepVQE 中用于实现远端参考信号与麦克风信号精确时间同步的机制,无需单独的延迟估计模块。 |
+| Mask Estimation | Mask Estimation | 掩码估计,深度学习语音增强中估计时频掩码以分离目标语音与干扰成分。 |
+| Voice Profile | Voice Profile | 语音指纹 / 声纹,用户独特的声学特征签名,用于语音隔离技术中的个性化降噪。 |
+| Residual Echo Suppression | Residual Echo Suppression | 残差回声抑制,AEC 后处理步骤,用于消除自适应滤波器未能完全消除的残余回声。 |
+| Speech Enhancement | Speech Enhancement | 语音增强,综合运用降噪、去混响、回声消除等技术提升语音清晰度与可懂度的处理过程。 |
+| Beamforming | Beamforming | 波束形成,利用多麦克风阵列实现定向拾音,增强目标方向信号并抑制其它方向噪声。 |
+| Spatial Filtering | Spatial Filtering | 空间滤波,基于声源空间位置信息抑制非目标方向的噪声与干扰。 |
+| BiGRU | Bidirectional Gated Recurrent Unit | 双向门控循环单元,DeepVQE 中使用的循环神经网络层,用于捕获音频信号的时序依赖关系。 |
+| CNN | Convolutional Neural Network | 卷积神经网络,DeepVQE 编码器使用的残差 CNN 块,用于提取音频频谱特征。 |
+| INT8 Quantization | INT8 Quantization | 8 位整数量化,将浮点模型参数转换为 8 位整数以减小模型体积与推理延迟,精度损失通常 < 1%。 |
+| Perceptual Loss | Perceptual Loss | 感知损失,在训练深度学习音频模型时优化主观听觉质量而非仅最小化数值误差的损失函数。 |
+| Adversarial Training | Adversarial Training | 对抗训练,通过引入对抗样本提升模型鲁棒性的训练策略。 |
+| Steady-state Noise | Steady-state Noise | 稳态噪声,持续性背景噪声 (如风扇、空调),特征相对稳定,适合深度抑制。 |
+| Transient Noise | Transient Noise | 瞬态噪声,短时突发性噪声 (如键盘敲击、关门声),需要精准检测与消除。 |
+| Music Noise Artifact | Music Noise Artifact | 音乐噪声伪影,频谱减法等传统降噪算法产生的不自然听觉伪影,表现为断续的音调噪声。 |
 
 ## 6. 设备与硬件
 
@@ -257,6 +294,12 @@
 | Vulkan | Vulkan | 跨平台低层 GPU API,可作为 Whisper 加速后端。 |
 | CPU | Central Processing Unit | 中央处理器,作为推理的回退后端。 |
 | GPU | Graphics Processing Unit | 图形处理器,常用于并行推理。 |
+| NPU | Neural Processing Unit | 神经网络处理单元,专用 AI 推理加速器,如 Intel AMX、AMD Ryzen AI、Qualcomm Hexagon 等。 |
+| Intel AMX | Intel Advanced Matrix Extensions | 英特尔高级矩阵扩展指令集,用于优化深度学习推理性能。 |
+| AMD Ryzen AI | AMD Ryzen AI NPU | AMD 的嵌入式 AI 加速单元,可为音频处理等任务提供低功耗推理加速。 |
+| Qualcomm Hexagon | Qualcomm Hexagon DSP | 高通 Hexagon 数字信号处理器,用于移动端与边缘设备的 AI 推理加速。 |
+| NVIDIA TensorRT | NVIDIA TensorRT | NVIDIA 的深度学习推理优化引擎与运行时,支持模型优化、量化与高效推理部署。 |
+| DSP | Digital Signal Processor | 数字信号处理器,专用于实时信号处理的硬件,认证音频设备可通过硬件 DSP 卸载 AEC 等处理。 |
 
 ## 11. Rust 编程概念
 
@@ -375,6 +418,9 @@
 | UX | User Experience | 用户体验。 |
 | ML | Machine Learning | 机器学习,转写与降噪的基础。 |
 | RNN | Recurrent Neural Network | 循环神经网络,RNNoise 使用的网络结构。 |
+| CNN | Convolutional Neural Network | 卷积神经网络,见第 5 节。 |
+| BiGRU | Bidirectional Gated Recurrent Unit | 双向门控循环单元,见第 5 节。 |
+| MSE | Mean Squared Error | 均方误差,深度学习模型训练中最常用的损失函数之一。 |
 | GPU | Graphics Processing Unit | 图形处理器,见第 10 节。 |
 | SDK | Software Development Kit | 软件开发工具包。 |
 | N/A | Not Applicable | 不适用。 |
