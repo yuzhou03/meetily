@@ -28,13 +28,13 @@ Meetily's audio system is implemented in Rust within the Tauri backend
 (`frontend/src-tauri/src/audio/`). The pipeline is divided into the following
 major subsystems:
 
-| Subsystem | Source File(s) | Responsibility |
-|-----------|---------------|----------------|
-| Capture | `pipeline.rs` (`AudioCapture`), `capture/` | Device capture, resampling, enhancement |
-| Mixing | `pipeline.rs` (`AudioMixerRingBuffer`, `ProfessionalAudioMixer`) | Mic + system audio mixing |
-| VAD | `vad.rs` (`ContinuousVadProcessor`) | Speech segmentation via Silero VAD |
-| Transcription | `transcription/`, `whisper_engine/`, `parakeet_engine/` | STT via Whisper or Parakeet |
-| Post-processing | `post_processor.rs` | Transcript text cleanup |
+| Subsystem       | Source File(s)                                                   | Responsibility                          |
+| --------------- | ---------------------------------------------------------------- | --------------------------------------- |
+| Capture         | `pipeline.rs` (`AudioCapture`), `capture/`                       | Device capture, resampling, enhancement |
+| Mixing          | `pipeline.rs` (`AudioMixerRingBuffer`, `ProfessionalAudioMixer`) | Mic + system audio mixing               |
+| VAD             | `vad.rs` (`ContinuousVadProcessor`)                              | Speech segmentation via Silero VAD      |
+| Transcription   | `transcription/`, `whisper_engine/`, `parakeet_engine/`          | STT via Whisper or Parakeet             |
+| Post-processing | `post_processor.rs`                                              | Transcript text cleanup                 |
 
 The pipeline processes audio **per-device at capture time** (enhancement) and
 **after mixing** (VAD + transcription).
@@ -61,24 +61,19 @@ A thorough analysis of the entire codebase (`frontend/src-tauri/src/audio/`,
 Meetily's design inherently avoids the echo problem through **dual-stream
 separation**:
 
-```
-┌─────────────────────┐    ┌──────────────────────┐
-│  Microphone Stream   │    │  System Audio Stream  │
-│  (User's voice)      │    │  (Remote participants,│
-│  CPAL capture        │    │   media playback)     │
-│                      │    │  Core Audio / CPAL     │
-└──────────┬───────────┘    └──────────┬────────────┘
-           │                           │
-           ▼                           ▼
-     [Enhancement]              [Raw capture]
-     HPF → NR → LUFS            (no enhancement)
-           │                           │
-           └───────────┬───────────────┘
-                       ▼
-               [Ring Buffer Mix]
-                       │
-                       ▼
-              [VAD → Transcription]
+```mermaid
+flowchart TB
+    subgraph MicStream["Microphone Stream (User's voice)"]
+        MC["CPAL capture"] --> EN["Enhancement: HPF to NR to LUFS"]
+    end
+
+    subgraph SysStream["System Audio Stream (Remote participants, media playback)"]
+        SC["Core Audio / CPAL"] --> RC["Raw capture (no enhancement)"]
+    end
+
+    EN --> MIX["Ring Buffer Mix"]
+    RC --> MIX
+    MIX --> VAD["VAD to Transcription"]
 ```
 
 - **Microphone** captures only the local user's voice (plus ambient noise).
@@ -122,6 +117,7 @@ implemented via the [`nnnoiseless`](https://crates.io/crates/nnnoiseless) crate
 (version `0.5`).
 
 **Dependency declaration** (`Cargo.toml`):
+
 ```toml
 # Noise suppression - RNNoise-based neural network noise reduction
 nnnoiseless = "0.5"
@@ -141,28 +137,28 @@ pub struct NoiseSuppressionProcessor {
 
 **Key characteristics:**
 
-| Property | Value |
-|----------|-------|
-| Algorithm | RNNoise (recurrent neural network) |
-| Library | `nnnoiseless` v0.5 |
-| Sample Rate | 48000 Hz (required) |
-| Frame Size | 480 samples (10 ms) |
-| Noise Reduction | 10–15 dB in typical environments |
-| Latency | ~10 ms per frame |
-| VAD Output | Returns VAD probability (0.0–1.0) per frame |
+| Property        | Value                                       |
+| --------------- | ------------------------------------------- |
+| Algorithm       | RNNoise (recurrent neural network)          |
+| Library         | `nnnoiseless` v0.5                          |
+| Sample Rate     | 48000 Hz (required)                         |
+| Frame Size      | 480 samples (10 ms)                         |
+| Noise Reduction | 10–15 dB in typical environments            |
+| Latency         | ~10 ms per frame                            |
+| VAD Output      | Returns VAD probability (0.0–1.0) per frame |
 
 #### 3.1.2 Processing Logic
 
-```
-Input samples → frame_buffer (accumulate)
-                  ↓ (when ≥ 480 samples)
-            Extract 480-sample frame
-                  ↓
-         DenoiseState::process_frame()
-                  ↓
-        Denoised frame → Output buffer
-                  ↓
-        Remaining samples stay in buffer
+```mermaid
+flowchart TB
+    A["Input samples"] --> B["frame_buffer (accumulate)"]
+    B --> C{"Buffer >= 480 samples?"}
+    C -- No --> B
+    C -- Yes --> D["Extract 480-sample frame"]
+    D --> E["DenoiseState.process_frame()"]
+    E --> F["Denoised frame to Output buffer"]
+    F --> G["Remaining samples stay in buffer"]
+    G --> B
 ```
 
 - Audio is processed in fixed **480-sample frames** (10 ms at 48 kHz).
@@ -180,9 +176,10 @@ pub const RNNOISE_APPLY_ENABLED: bool = false;
 
 The rationale stated in the code:
 
-> *"Whisper handles noise well internally — RNNoise is optional"*
+> _"Whisper handles noise well internally — RNNoise is optional"_
 
 This means:
+
 - Whisper's neural network already has strong noise robustness.
 - RNNoise may introduce artifacts on clean audio.
 - Users who need extra noise suppression can enable it by setting the flag to
@@ -191,6 +188,7 @@ This means:
 #### 3.1.4 When RNNoise Is Enabled
 
 If `RNNOISE_APPLY_ENABLED = true`:
+
 - RNNoise is initialized **only for microphone streams** (not system audio).
 - It applies as **Step 2** in the enhancement pipeline (after high-pass filter,
   before normalization).
@@ -209,15 +207,16 @@ pub struct HighPassFilter {
 }
 ```
 
-| Property | Value |
-|----------|-------|
-| Type | First-order IIR (Infinite Impulse Response) |
-| Cutoff | 80 Hz |
-| Formula | `y[n] = α × (y[n-1] + x[n] - x[n-1])` |
-| Applied to | Microphone only |
-| Always on | Yes (when microphone is present) |
+| Property   | Value                                       |
+| ---------- | ------------------------------------------- |
+| Type       | First-order IIR (Infinite Impulse Response) |
+| Cutoff     | 80 Hz                                       |
+| Formula    | `y[n] = α × (y[n-1] + x[n] - x[n-1])`       |
+| Applied to | Microphone only                             |
+| Always on  | Yes (when microphone is present)            |
 
 This filter removes:
+
 - Desk vibrations and mechanical rumble
 - Low-frequency HVAC noise
 - Speaker-induced feedback below speech range
@@ -232,6 +231,7 @@ implementations retained for reference.
 ### 3.4 Whisper's Internal Noise Handling
 
 Whisper (the speech-to-text engine) has inherent noise robustness:
+
 - It was trained on diverse audio including noisy environments.
 - It uses attention mechanisms that naturally focus on speech patterns.
 - For this reason, the Meetily team chose to disable RNNoise by default.
@@ -242,89 +242,59 @@ Whisper (the speech-to-text engine) has inherent noise robustness:
 
 ### 4.1 Complete Pipeline Flow
 
-```
-  ┌─────────────────────────────────────────────────────────────┐
-  │                   CAPTURE PHASE (per-device)                 │
-  │                                                              │
-  │  Raw Audio (CPAL/CoreAudio)                                  │
-  │       │                                                      │
-  │       ▼                                                      │
-  │  [1] audio_to_mono()  — Convert multi-channel to mono        │
-  │       │                                                      │
-  │       ▼                                                      │
-  │  [2] Resample to 48kHz (if needed)                           │
-  │       │   - Persistent SincFixedIn resampler (rubato)        │
-  │       │   - 512-sample buffered chunks                       │
-  │       │   - Adaptive quality based on rate ratio             │
-  │       │                                                      │
-  │       ▼  (Microphone Only)                                   │
-  │  [3] HighPassFilter — Remove rumble < 80 Hz                  │
-  │       │                                                      │
-  │       ▼  (Microphone Only, if RNNOISE_APPLY_ENABLED)         │
-  │  [4] NoiseSuppressionProcessor — RNNoise 10-15 dB reduction  │
-  │       │                                                      │
-  │       ▼  (Microphone Only)                                   │
-  │  [5] LoudnessNormalizer — EBU R128 to -23 LUFS              │
-  │       │   + True Peak Limiter (-1 dBTP)                      │
-  │       │                                                      │
-  │       ▼                                                      │
-  │  AudioChunk → RecordingState channel                         │
-  └─────────────────────────────────────────────────────────────┘
-                          │
-                          ▼
-  ┌─────────────────────────────────────────────────────────────┐
-  │                   MIXING PHASE                               │
-  │                                                              │
-  │  AudioMixerRingBuffer (600ms windows, 4.8s max buffer)       │
-  │       │                                                      │
-  │       ▼                                                      │
-  │  ProfessionalAudioMixer                                      │
-  │       │   - Mic at full volume                               │
-  │       │   - System at 100% (scaled)                          │
-  │       │   - Soft proportional scaling (no hard clipping)     │
-  │       │                                                      │
-  │       ▼                                                      │
-  │  Mixed Audio (48 kHz, mono)                                  │
-  └─────────────────────────────────────────────────────────────┘
-                          │
-                          ▼
-  ┌─────────────────────────────────────────────────────────────┐
-  │                   VAD PHASE                                  │
-  │                                                              │
-  │  Resample 48kHz → 16kHz (anti-aliased downsampling)          │
-  │       │                                                      │
-  │       ▼                                                      │
-  │  Silero VAD (30ms chunks = 480 samples at 16kHz)             │
-  │       │   - positive_speech_threshold: 0.50                   │
-  │       │   - negative_speech_threshold: 0.35                   │
-  │       │   - redemption_time: 400 ms                           │
-  │       │   - min_speech_time: 250 ms                           │
-  │       │   - pre_speech_pad: 300 ms                            │
-  │       │   - post_speech_pad: 400 ms                           │
-  │       │                                                      │
-  │       ▼                                                      │
-  │  SpeechSegment (≥ 50ms / 800 samples at 16kHz)               │
-  └─────────────────────────────────────────────────────────────┘
-                          │
-                          ▼
-  ┌─────────────────────────────────────────────────────────────┐
-  │                   TRANSCRIPTION PHASE                         │
-  │                                                              │
-  │  Whisper / Parakeet / Deepgram                                │
-  │       │   - Internal noise robustness                        │
-  │       │   - Language-specific models                         │
-  │       │                                                      │
-  │       ▼                                                      │
-  │  Raw Text → PostProcessor (dedup, artifact removal)           │
-  └─────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph CAPTURE["CAPTURE PHASE (per-device)"]
+        direction TB
+        RAW["Raw Audio (CPAL/CoreAudio)"]
+        S1["1. audio_to_mono() — Convert multi-channel to mono"]
+        S2["2. Resample to 48kHz (if needed)<br/>Persistent SincFixedIn (rubato), 512-sample buffered chunks,<br/>Adaptive quality based on rate ratio"]
+        S3["3. HighPassFilter — Remove rumble below 80 Hz (Mic Only)"]
+        S4["4. NoiseSuppressionProcessor — RNNoise 10-15 dB reduction (Mic Only, if RNNOISE_APPLY_ENABLED)"]
+        S5["5. LoudnessNormalizer — EBU R128 to -23 LUFS + True Peak Limiter (-1 dBTP) (Mic Only)"]
+        CHUNK["AudioChunk to RecordingState channel"]
+
+        RAW --> S1 --> S2 --> S3 --> S4 --> S5 --> CHUNK
+    end
+
+    subgraph MIXING["MIXING PHASE"]
+        direction TB
+        RB["AudioMixerRingBuffer (600ms windows, 4.8s max buffer)"]
+        MX["ProfessionalAudioMixer<br/>Mic at full volume, System at 100% (scaled),<br/>Soft proportional scaling (no hard clipping)"]
+        MA["Mixed Audio (48 kHz, mono)"]
+
+        RB --> MX --> MA
+    end
+
+    subgraph VAD["VAD PHASE"]
+        direction TB
+        RS["Resample 48kHz to 16kHz (anti-aliased downsampling)"]
+        SV["Silero VAD (30ms chunks = 480 samples at 16kHz)<br/>positive_speech_threshold: 0.50<br/>negative_speech_threshold: 0.35<br/>redemption_time: 400 ms<br/>min_speech_time: 250 ms<br/>pre_speech_pad: 300 ms<br/>post_speech_pad: 400 ms"]
+        SEG["SpeechSegment (>= 50ms / 800 samples at 16kHz)"]
+
+        RS --> SV --> SEG
+    end
+
+    subgraph TRANS["TRANSCRIPTION PHASE"]
+        direction TB
+        WP["Whisper / Parakeet / Deepgram<br/>(Internal noise robustness, Language-specific models)"]
+        PP["Raw Text to PostProcessor (dedup, artifact removal)"]
+
+        WP --> PP
+    end
+
+    CHUNK --> RB
+    MA --> RS
+    SEG --> WP
 ```
 
 ### 4.2 Processing Order Rationale
 
 The microphone enhancement order is critical:
 
-```
-High-Pass Filter → RNNoise → EBU R128 Normalizer
+```mermaid
+flowchart LR
+    A["High-Pass Filter"] --> B["RNNoise"] --> C["EBU R128 Normalizer"]
 ```
 
 1. **High-pass first**: Removes low-frequency energy that would confuse the
@@ -340,10 +310,10 @@ High-Pass Filter → RNNoise → EBU R128 Normalizer
 
 ### 5.1 RNNoise (`NoiseSuppressionProcessor`)
 
-| File | `audio_processing.rs` (lines 227–341) |
-|------|---------------------------------------|
-| Struct | `NoiseSuppressionProcessor` |
-| Crate | `nnnoiseless` v0.5 |
+| File     | `audio_processing.rs` (lines 227–341)                  |
+| -------- | ------------------------------------------------------ |
+| Struct   | `NoiseSuppressionProcessor`                            |
+| Crate    | `nnnoiseless` v0.5                                     |
 | Core API | `DenoiseState::new()`, `DenoiseState::process_frame()` |
 
 ```rust
@@ -358,10 +328,10 @@ while self.frame_buffer.len() >= self.frame_size {
 
 ### 5.2 High-Pass Filter (`HighPassFilter`)
 
-| File | `audio_processing.rs` (lines 343–403) |
-|------|---------------------------------------|
-| Type | First-order IIR |
-| Cutoff | 80 Hz (configurable at construction) |
+| File   | `audio_processing.rs` (lines 343–403) |
+| ------ | ------------------------------------- |
+| Type   | First-order IIR                       |
+| Cutoff | 80 Hz (configurable at construction)  |
 
 ```rust
 // IIR formula
@@ -370,24 +340,24 @@ let filtered = self.alpha * (self.prev_output + sample - self.prev_input);
 
 ### 5.3 EBU R128 Loudness Normalizer (`LoudnessNormalizer`)
 
-| File | `audio_processing.rs` (lines 139–225) |
-|------|---------------------------------------|
-| Standard | EBU R128 |
-| Target | -23 LUFS |
-| True Peak Limit | -1 dBTP |
-| Analysis Chunk | 512 samples |
-| Library | `ebur128` v0.1 |
-| Limiter | 10 ms lookahead true peak limiter |
+| File            | `audio_processing.rs` (lines 139–225) |
+| --------------- | ------------------------------------- |
+| Standard        | EBU R128                              |
+| Target          | -23 LUFS                              |
+| True Peak Limit | -1 dBTP                               |
+| Analysis Chunk  | 512 samples                           |
+| Library         | `ebur128` v0.1                        |
+| Limiter         | 10 ms lookahead true peak limiter     |
 
 ### 5.4 Resampler (`rubato` SincFixedIn)
 
-| Parameter | Value Based on Ratio |
-|-----------|---------------------|
-| Ratio ≥ 2.0x | sinc_len=512, Cubic, oversample=512 |
-| Ratio ≥ 1.5x | sinc_len=384, Cubic, oversample=384 |
+| Parameter    | Value Based on Ratio                 |
+| ------------ | ------------------------------------ |
+| Ratio ≥ 2.0x | sinc_len=512, Cubic, oversample=512  |
+| Ratio ≥ 1.5x | sinc_len=384, Cubic, oversample=384  |
 | Ratio > 1.0x | sinc_len=256, Linear, oversample=256 |
-| Ratio ≤ 0.5x | sinc_len=512, Cubic, oversample=512 |
-| Other | sinc_len=384, Linear, oversample=384 |
+| Ratio ≤ 0.5x | sinc_len=512, Cubic, oversample=512  |
+| Other        | sinc_len=384, Linear, oversample=384 |
 
 Window function: `BlackmanHarris2`, f_cutoff: 0.95.
 
@@ -397,11 +367,11 @@ Window function: `BlackmanHarris2`, f_cutoff: 0.95.
 
 ### 6.1 Audio Capture Backends
 
-| Platform | Microphone | System Audio |
-|----------|-----------|--------------|
-| **macOS** | CPAL | Core Audio (`cidre` crate) or ScreenCaptureKit |
-| **Windows** | CPAL (WASAPI) | CPAL (WASAPI loopback) |
-| **Linux** | CPAL (PulseAudio/PipeWire) | CPAL (PulseAudio monitor) |
+| Platform    | Microphone                 | System Audio                                   |
+| ----------- | -------------------------- | ---------------------------------------------- |
+| **macOS**   | CPAL                       | Core Audio (`cidre` crate) or ScreenCaptureKit |
+| **Windows** | CPAL (WASAPI)              | CPAL (WASAPI loopback)                         |
+| **Linux**   | CPAL (PulseAudio/PipeWire) | CPAL (PulseAudio monitor)                      |
 
 macOS has a dedicated `core_audio.rs` implementation that uses Apple's
 Core Audio aggregate device + tap API for low-latency system audio capture.
@@ -409,6 +379,7 @@ Core Audio aggregate device + tap API for low-latency system audio capture.
 ### 6.2 System Audio Backend Selection
 
 On macOS, users can choose between:
+
 - **Core Audio** (default, recommended): Direct hardware tap via `cidre` crate
 - **ScreenCaptureKit**: Apple's screen capture API (includes audio)
 
@@ -427,10 +398,10 @@ The `device_detection.rs` module provides a 3-layer detection strategy:
 Device kind affects buffer timeouts:
 
 | Device Kind | Min Timeout | Max Timeout |
-|-------------|------------|-------------|
-| Wired | 20 ms | 50 ms |
-| Bluetooth | 80 ms | 200 ms |
-| Unknown | 80 ms | 180 ms |
+| ----------- | ----------- | ----------- |
+| Wired       | 20 ms       | 50 ms       |
+| Bluetooth   | 80 ms       | 200 ms      |
+| Unknown     | 80 ms       | 180 ms      |
 
 ### 6.4 VAD Redemption Time
 
@@ -450,11 +421,11 @@ captured before enhancement.
 
 ### 6.6 GPU Acceleration for Transcription
 
-| Platform | Default GPU Backend |
-|----------|-------------------|
-| macOS | Metal + CoreML |
-| Windows | CPU (OpenBLAS optional) |
-| Linux | CPU (CUDA/Vulkan/ROCm optional) |
+| Platform | Default GPU Backend             |
+| -------- | ------------------------------- |
+| macOS    | Metal + CoreML                  |
+| Windows  | CPU (OpenBLAS optional)         |
+| Linux    | CPU (CUDA/Vulkan/ROCm optional) |
 
 GPU acceleration affects Whisper/Parakeet transcription speed, not the audio
 enhancement pipeline.
@@ -465,52 +436,53 @@ enhancement pipeline.
 
 ### 7.1 Compile-Time Flags
 
-| Flag | File | Default | Description |
-|------|------|---------|-------------|
+| Flag                    | File              | Default | Description                              |
+| ----------------------- | ----------------- | ------- | ---------------------------------------- |
 | `RNNOISE_APPLY_ENABLED` | `ffmpeg_mixer.rs` | `false` | Enable/disable RNNoise noise suppression |
 
 To enable RNNoise, change the flag and recompile:
+
 ```rust
 pub const RNNOISE_APPLY_ENABLED: bool = true;
 ```
 
 ### 7.2 Audio Processing Parameters
 
-| Parameter | Value | Location |
-|-----------|-------|----------|
-| Target sample rate | 48000 Hz | `pipeline.rs` |
-| High-pass cutoff | 80 Hz | `pipeline.rs` |
-| EBU R128 target | -23 LUFS | `audio_processing.rs` |
-| True peak limit | -1 dBTP | `audio_processing.rs` |
-| Normalizer analysis chunk | 512 samples | `audio_processing.rs` |
-| RNNoise frame size | 480 samples (10ms) | `audio_processing.rs` |
-| Ring buffer window | 600 ms | `pipeline.rs` |
-| Ring buffer max | 4800 ms (8× window) | `pipeline.rs` |
+| Parameter                 | Value               | Location              |
+| ------------------------- | ------------------- | --------------------- |
+| Target sample rate        | 48000 Hz            | `pipeline.rs`         |
+| High-pass cutoff          | 80 Hz               | `pipeline.rs`         |
+| EBU R128 target           | -23 LUFS            | `audio_processing.rs` |
+| True peak limit           | -1 dBTP             | `audio_processing.rs` |
+| Normalizer analysis chunk | 512 samples         | `audio_processing.rs` |
+| RNNoise frame size        | 480 samples (10ms)  | `audio_processing.rs` |
+| Ring buffer window        | 600 ms              | `pipeline.rs`         |
+| Ring buffer max           | 4800 ms (8× window) | `pipeline.rs`         |
 
 ### 7.3 VAD Parameters
 
-| Parameter | Value | Location |
-|-----------|-------|----------|
-| VAD sample rate | 16000 Hz | `vad.rs` |
-| VAD chunk size | 480 samples (30ms) | `vad.rs` |
-| Positive speech threshold | 0.50 | `vad.rs` |
-| Negative speech threshold | 0.35 | `vad.rs` |
-| Redemption time | 400 ms | `vad.rs` / `pipeline.rs` |
-| Min speech time | 250 ms | `vad.rs` |
-| Pre-speech pad | 300 ms | `vad.rs` |
-| Post-speech pad | 400 ms | `vad.rs` |
-| Minimum segment length | 800 samples (50ms at 16kHz) | `pipeline.rs` |
+| Parameter                 | Value                       | Location                 |
+| ------------------------- | --------------------------- | ------------------------ |
+| VAD sample rate           | 16000 Hz                    | `vad.rs`                 |
+| VAD chunk size            | 480 samples (30ms)          | `vad.rs`                 |
+| Positive speech threshold | 0.50                        | `vad.rs`                 |
+| Negative speech threshold | 0.35                        | `vad.rs`                 |
+| Redemption time           | 400 ms                      | `vad.rs` / `pipeline.rs` |
+| Min speech time           | 250 ms                      | `vad.rs`                 |
+| Pre-speech pad            | 300 ms                      | `vad.rs`                 |
+| Post-speech pad           | 400 ms                      | `vad.rs`                 |
+| Minimum segment length    | 800 samples (50ms at 16kHz) | `pipeline.rs`            |
 
 ### 7.4 Mixing Parameters
 
-| Parameter | Value | Location |
-|-----------|-------|----------|
-| System audio scale | 1.0 (100%) | `pipeline.rs` |
-| Mic scale | 0.8 (reserved) | `pipeline.rs` |
-| Mixing window | 600 ms | `pipeline.rs` |
-| Adaptive ducking (FFmpeg mixer) | Enabled | `ffmpeg_mixer.rs` |
-| Speech threshold (ducking) | RMS > 0.01 | `ffmpeg_mixer.rs` |
-| System ducking level | 0.60 (60%) | `ffmpeg_mixer.rs` |
+| Parameter                       | Value          | Location          |
+| ------------------------------- | -------------- | ----------------- |
+| System audio scale              | 1.0 (100%)     | `pipeline.rs`     |
+| Mic scale                       | 0.8 (reserved) | `pipeline.rs`     |
+| Mixing window                   | 600 ms         | `pipeline.rs`     |
+| Adaptive ducking (FFmpeg mixer) | Enabled        | `ffmpeg_mixer.rs` |
+| Speech threshold (ducking)      | RMS > 0.01     | `ffmpeg_mixer.rs` |
+| System ducking level            | 0.60 (60%)     | `ffmpeg_mixer.rs` |
 
 ---
 
@@ -540,6 +512,7 @@ The `AudioMixerRingBuffer` in `pipeline.rs` is the active mixing implementation:
 
 The `FFmpegAudioMixer` in `ffmpeg_mixer.rs` provides an alternative mixing
 strategy with:
+
 - **Per-source buffering** with device-aware timeouts
 - **Gap detection** for Bluetooth jitter
 - **RMS-based adaptive ducking**: System audio is ducked to 60% when mic speech
@@ -558,6 +531,7 @@ The `ContinuousVadProcessor` uses [Silero VAD](https://github.com/snakers4/siler
 (via `silero_rs` crate) to segment speech from mixed audio.
 
 Key design decisions:
+
 - Operates at **16 kHz** (Silero requirement)
 - Processes in **30 ms chunks** (480 samples)
 - Returns complete speech segments (not individual frames)
@@ -567,6 +541,7 @@ Key design decisions:
 ### 9.2 VAD and Noise Interaction
 
 The VAD operates **after** all noise processing:
+
 - If RNNoise is enabled, noise-suppressed audio reaches VAD, resulting in
   cleaner speech/silence classification.
 - If RNNoise is disabled (default), raw normalized audio reaches VAD, which
@@ -578,19 +553,20 @@ The VAD operates **after** all noise processing:
 
 ### 10.1 Current State
 
-| Feature | Status |
-|---------|--------|
-| Acoustic Echo Cancellation (AEC) | **Not implemented** |
-| RNNoise Noise Suppression | **Implemented, disabled by default** |
-| High-Pass Filter (80 Hz) | **Implemented, always on (mic only)** |
-| EBU R128 Normalization | **Implemented, always on (mic only)** |
-| True Peak Limiting | **Implemented, always on** |
-| Spectral Subtraction | **Defined but unused (legacy)** |
-| Voice Activity Detection | **Implemented, always on** |
+| Feature                          | Status                                |
+| -------------------------------- | ------------------------------------- |
+| Acoustic Echo Cancellation (AEC) | **Not implemented**                   |
+| RNNoise Noise Suppression        | **Implemented, disabled by default**  |
+| High-Pass Filter (80 Hz)         | **Implemented, always on (mic only)** |
+| EBU R128 Normalization           | **Implemented, always on (mic only)** |
+| True Peak Limiting               | **Implemented, always on**            |
+| Spectral Subtraction             | **Defined but unused (legacy)**       |
+| Voice Activity Detection         | **Implemented, always on**            |
 
 ### 10.2 Design Philosophy
 
 Meetily prioritizes a **clean capture → enhance → transcribe** approach:
+
 - Capture separate streams to avoid echo at the architecture level
 - Apply minimal enhancement (HPF + optional NR + normalization)
 - Rely on Whisper's internal noise robustness for transcription quality
@@ -609,6 +585,7 @@ If you experience excessive background noise:
 
 The `audio_v2/` module contains placeholder implementations for a next-generation
 audio system including:
+
 - Professional audio mixing with dynamic ducking and crossfading
 - EBU R128 normalization (refactored)
 - True peak limiting (refactored)
