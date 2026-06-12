@@ -1,0 +1,51 @@
+{
+  "last_updated": "2026-06-10T03:12:00.323775300+00:00",
+  "segments": [
+    {
+      "audio_end_time": 5.31,
+      "audio_start_time": 1.26,
+      "confidence": 0.9937008619308472,
+      "display_time": "11:00:48",
+      "duration": 4.05,
+      "id": "seg_0",
+      "sequence_id": 0,
+      "speaker": "mic",
+      "text": "我们开始开会吧,你可以试给他中文吗?"
+    },
+    {
+      "audio_end_time": 15.69,
+      "audio_start_time": 10.74,
+      "confidence": 0.9274757504463196,
+      "display_time": "11:03:53",
+      "duration": 4.95,
+      "id": "seg_1",
+      "sequence_id": 1,
+      "speaker": "mic",
+      "text": "给我转录成中文,谢谢"
+    },
+    {
+      "audio_end_time": 23.04,
+      "audio_start_time": 18.9,
+      "confidence": 0.9963068962097168,
+      "display_time": "11:07:19",
+      "duration": 4.14,
+      "id": "seg_2",
+      "sequence_id": 2,
+      "speaker": "mic",
+      "text": "Can you recognize Chinese?"
+    },
+    {
+      "audio_end_time": 30.69,
+      "audio_start_time": 22.98,
+      "confidence": 0.9679113030433655,
+      "display_time": "11:11:58",
+      "duration": 7.71,
+      "id": "seg_3",
+      "sequence_id": 3,
+      "speaker": "mic",
+      "text": "If you can, please transcript the transcription into Chinese. Thank you."
+    }
+  ],
+  "total_segments": 4,
+  "version": "1.0"
+}
